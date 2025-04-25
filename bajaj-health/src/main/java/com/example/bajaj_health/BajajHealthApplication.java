@@ -49,17 +49,23 @@ public class BajajHealthApplication {
 
             String webhookUrl = response.getBody().getWebhook();
             String accessToken = response.getBody().getAccessToken();
-            List<User> users = response.getBody().getData().getUsers();
+            DataWrapper data = response.getBody().getData();
 
-            // 2. Solve mutual followers
-            List<List<Integer>> outcome = findMutualFollowers(users);
-
-            // 3. Prepare result JSON
             Map<String, Object> result = new HashMap<>();
             result.put("regNo", regNo);
-            result.put("outcome", outcome);
 
-            // 4. POST to webhook with retry
+            // Decide which question to solve
+            if (data.getN() != null && data.getFindId() != null) {
+                // Question 2: Nth-Level Followers
+                List<Integer> outcome = findNthLevelFollowers(data.getUsers(), data.getFindId(), data.getN());
+                result.put("outcome", outcome);
+            } else {
+                // Question 1: Mutual Followers
+                List<List<Integer>> outcome = findMutualFollowers(data.getUsers());
+                result.put("outcome", outcome);
+            }
+
+            // POST to webhook with retry
             postWithRetry(restTemplate, webhookUrl, accessToken, result, 4);
         };
     }
@@ -81,8 +87,38 @@ public class BajajHealthApplication {
             }
         }
         List<List<Integer>> result = new ArrayList<>(resultSet);
-        result.sort(Comparator.comparingInt((List<Integer> l) -> l.get(0))
-                .thenComparingInt(l -> l.get(1)));
+        result.sort(Comparator.comparingInt((List<Integer> l) -> l.get(0)).thenComparingInt(l -> l.get(1)));
+        return result;
+    }
+
+    private static List<Integer> findNthLevelFollowers(List<User> users, int findId, int n) {
+        Map<Integer, List<Integer>> graph = new HashMap<>();
+        for (User user : users) {
+            graph.put(user.getId(), user.getFollows());
+        }
+
+        Set<Integer> visited = new HashSet<>();
+        Queue<Integer> queue = new LinkedList<>();
+        queue.add(findId);
+        visited.add(findId);
+
+        int level = 0;
+        while (!queue.isEmpty() && level < n) {
+            int size = queue.size();
+            for (int i = 0; i < size; i++) {
+                int curr = queue.poll();
+                for (int next : graph.getOrDefault(curr, Collections.emptyList())) {
+                    if (!visited.contains(next)) {
+                        queue.add(next);
+                        visited.add(next);
+                    }
+                }
+            }
+            level++;
+        }
+
+        List<Integer> result = new ArrayList<>(queue);
+        Collections.sort(result);
         return result;
     }
 
